@@ -3,7 +3,7 @@ Program pengujian rangkaian sistem digital kombinational komplex dengan mengguna
 
 Langkah-Langkah pembuatan pogram pengujian
 1. Persiapan Software/Tools (Python 3.8, pyverilog, icariusverilog: Tautan https://pypi.org/project/pyverilog/)
-2. Menentukan rangkaian sistem digital kombinational (rangkaian_uji.png)
+2. Menentukan rangkaian sistem digital kombinational (Rangkaian Uji 17 Gate.png)
 3. Mengubah rangkaian kedalam bahasa pyverilog
 4. Membuat code program main.py dalam hal ini yaitu exhaustive_method.py (Pada bagian Brach rangkaian_verilog)
 5. Jalankan program dengan menggunakan script berikut: sudo python3 exhausted_method.py -t circuit circuit_test17gate.v
