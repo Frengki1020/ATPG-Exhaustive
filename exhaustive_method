@@ -1,0 +1,288 @@
+from argparse import ArgumentParser
+
+#command_line arguments
+
+argParser = ArgumentParser(description="Generates test vector for specified Verilog module.")
+argParser.add_argument('filelist', metavar='filename', nargs='+', help='verilog files to compile')
+argParser.add_argument('-t','--top',required=True, help='Top-level module to analyze')
+
+args = argParser.parse_args()
+print('Received arguments:', args)
+
+import pyverilog
+from pyverilog.vparser.parser import parse
+
+# Parse Netlist
+filelist = args.filelist
+parseResult = parse(filelist)
+
+#Get the module object
+module = next(mod for mod in parseResult[0].description.definitions if mod.name == args.top)
+
+#Get input, output and wires
+inputList = []
+outputList = []
+#gateIOList = []
+
+#print(module.items)
+
+for item in module.items:
+    if(type(item).__name__ == "Decl"):
+        if(type(item.list[0]).__name__== "Input"):
+            inputList.append(item.list[0].name)
+            faultPoints = inputList + outputList 
+        elif (type(item.list[0]).__name__ == "Output"):
+            outputList.append(item.list[0].name)
+            faultPoints = inputList + outputList 
+        
+                           
+print('\nInput ports:' ,inputList)
+print('Output ports:' ,outputList)
+
+#testbench
+print('\nGenerating testbench...:' ,end=' ')
+
+import time
+start_time = time.time()
+
+# Testbench code: Instantiation of golden module
+tbcode_instGM = f'{module.name} gm(\n'
+cnt = 0
+for portIn in inputList:
+    tbcode_instGM +=f'  .{portIn} (inputs[{cnt}]),\n'
+    cnt +=1
+
+cnt = 0
+for portOut in outputList:
+    if portOut != outputList[0]:
+        tbcode_instGM += ',\n'
+    tbcode_instGM +=f'  .{portOut} (outputs[0][{cnt}])'
+    cnt += 1
+tbcode_instGM += '\n);'
+
+# Testbench code: Instantiation of faulty modules
+tbcode_instUUT = f'''genvar i;
+generate for(i=1; i<={(len(faultPoints))}; i=i+1) begin :
+faulty
+    {module.name} uut(
+'''
+cnt = 0
+for portIn in inputList:
+    tbcode_instUUT +=f'     .{portIn} (inputs[{cnt}]),\n'
+    cnt += 1
+
+cnt = 0
+for portOut in outputList:
+    if portOut != outputList[0]:
+        tbcode_instUUT += ',\n'
+    tbcode_instUUT += f'    .{portOut}(outputs[i][{cnt}])'
+    cnt += 1
+
+tbcode_instUUT += '''\n     );
+end endgenerate'''
+
+tbcode_process = f'''
+integer fhdl; //Output file handle
+integer j;
+
+initial begin 
+    fhdl = $fopen("stim_sa0.csv","w");
+    //$fstrobe(fhdl,"stimulus, detected");
+'''
+cnt = 1
+for fault in faultPoints:
+    tbcode_process +=f'     force faulty[{cnt}].uut.{fault} = 1\'b0;\n'
+    cnt += 1
+
+tbcode_process +=f'''
+    for(inputs='d0; inputs !=~{len(inputList)}'d0; inputs = inputs + 1'b1) begin
+        #1000;
+        $fwrite(fhdl, "%B", inputs);
+        $write("sa0 %B", inputs);
+        for(j=1; j<={(len(faultPoints))}; j=j+1)
+            if (outputs[j] != outputs[0]) begin
+                $fwrite(fhdl, ",%0d", j);
+                $write("\\t%B",(outputs[j]^outputs[0]));
+            end
+        $fwrite(fhdl, "\\n");
+        $write("\\n");
+    end
+
+        #1000;
+        $fwrite(fhdl, "%B", inputs);
+        $write("sa0 %B", inputs);
+        for(j=1; j<={(len(faultPoints))}; j=j+1)
+            if (outputs[j] != outputs[0]) begin
+                $fwrite(fhdl, ",%0d", j);
+                $write("\\t%B",(outputs[j]^outputs[0]));
+            end
+        $fwrite(fhdl, "\\n");
+        $write("\\n");
+        $fclose(fhdl);
+                    
+        fhdl = $fopen("stim_sa1.csv","w");
+        //$fstrobe(fhdl,"stimulus, detected");
+'''
+
+cnt = 1
+for fault in faultPoints:
+    tbcode_process +=f'     force faulty[{cnt}].uut.{fault} = 1\'b1;\n'
+    cnt += 1
+
+tbcode_process +=f'''
+    for(inputs='d0; inputs !=~{len(inputList)}'d0; inputs = inputs + 1'b1) begin
+        #1000;
+        $fwrite(fhdl, "%B", inputs);
+        $write("sa1 %B", inputs);
+        for(j=1; j<={(len(faultPoints))}; j=j+1)
+            if (outputs[j] != outputs[0]) begin
+                $fwrite(fhdl, ",%0d", j);
+                $write("\\t%B",(outputs[j]^outputs[0]));
+            end
+        $fwrite(fhdl, "\\n");
+        $write("\\n");
+    end
+        
+    #1000;
+    $fwrite(fhdl, "%B", inputs);
+    $write("sa1 %B", inputs);
+    for(j=1; j<={(len(faultPoints))}; j=j+1)
+        if (outputs[j] != outputs[0]) begin
+            $fwrite(fhdl, ",%0d", j);
+            $write("\\t%B",(outputs[j]^outputs[0]));
+        end
+    $fwrite(fhdl, "\\n");
+    $write("\\n");
+    $fclose(fhdl);
+        
+'''
+tbcode_process += 'end\n'
+
+tbcode = f'''
+module tb_fault;
+
+reg[{(len(inputList)-1)}:0] inputs;
+wire[{(len(outputList)-1)}:0] outputs [0:{(len(faultPoints))}];
+
+{tbcode_instGM}
+
+{tbcode_instUUT}
+
+{tbcode_process}
+
+endmodule
+'''
+
+f_tb= open('tb_fault.v','w')
+f_tb.write(tbcode)
+f_tb.close()
+
+print('Done!')
+
+
+# Run Simulation
+import os
+
+exec_cmd = 'sudo iverilog -o tb_fault.o'
+#for filename in args.inc:
+#    exec_cmd += ' '+filename[0]
+    
+for filename in filelist:
+    exec_cmd += ' '+filename
+
+exec_cmd += ' tb_fault.v'
+
+print('Executing:',exec_cmd)
+os.system(exec_cmd)
+
+exec_cmd = 'vvp tb_fault.o'
+print('Executing:',exec_cmd)
+os.system(exec_cmd)
+
+
+# Parse result
+import csv
+
+f_csv = open('stim_sa0.csv', newline='')
+csvParser = csv.reader(f_csv)
+first_row = next(csvParser)
+stim_sa0 = {first_row[0] : first_row[1:]}
+max_faultCount = len(first_row[1:])
+max_vector = first_row[0]
+for rows in csvParser:
+    stim_sa0[rows[0]] = rows[1:]
+    current_faultCount = len(rows[1:])
+    if(current_faultCount > max_faultCount):
+        max_vector = rows[0]
+        max_faultCount = current_faultCount
+        
+f_csv.close()
+
+temp_vector = stim_sa0
+test_vector = [ max_vector ]
+detFaultList = stim_sa0[max_vector]
+
+max_faultCount = 1
+while (max_faultCount > 0):
+    max_faultCount = 0
+    for key in temp_vector.keys():
+        temp_vector[key] = [num for num in temp_vector[key] if num not in detFaultList]
+        current_faultCount = len(temp_vector[key])
+        if (current_faultCount > max_faultCount):
+            max_vector = key
+            max_faultCount = current_faultCount
+    if(max_faultCount > 0):
+        test_vector.append(max_vector)
+        detFaultList += temp_vector[max_vector]
+        
+
+f_csv = open('stim_sa1.csv', newline='')
+csvParser = csv.reader(f_csv)
+first_row = next(csvParser)
+stim_sa1 = {first_row[0] : first_row[1:]}
+max_faultCount = len(first_row[1:])
+max_vector = first_row[0]
+for rows in csvParser:
+    stim_sa1[rows[0]] = rows[1:]
+    current_faultCount = len(rows[1:])
+    if(current_faultCount > max_faultCount):
+        max_vector = rows[0]
+        max_faultCount = current_faultCount
+        
+f_csv.close()
+
+temp_vector = stim_sa1
+if max_vector not in test_vector:
+    test_vector.append(max_vector)
+    
+detFaultList1 = stim_sa1[max_vector]
+
+max_faultCount = 1
+while (max_faultCount > 0):
+    max_faultCount = 0
+    for key in temp_vector.keys():
+        temp_vector[key] = [num for num in temp_vector[key] if num not in detFaultList1]
+        current_faultCount = len(temp_vector[key])
+        if (current_faultCount > max_faultCount):
+            max_vector = key
+            max_faultCount = current_faultCount
+    if(max_faultCount > 0):
+        test_vector.append(max_vector)
+        detFaultList1 += temp_vector[max_vector]
+
+print ('[', end = ' ')
+for entry in reversed(inputList): 
+    print(entry, end = '-')
+print('\b ]')
+       
+print('\nDeteksi',(len(detFaultList)), 'sa0 &', (len(detFaultList1)), 'sa1 faults, Total at', (len(detFaultList)+len(detFaultList1)), 'faults, out of', (2*len(faultPoints)), 'Fault Covarage(', ((len(detFaultList)+len(detFaultList1))*100.0/(2*len(faultPoints))), '% )')
+
+end_time = time.time()
+print('\nWaktu untuk Testing Rangkaian :',round((end_time-start_time),4),' seconds')
+print ('\nTest vectors (', len(test_vector), '): [', end = ' ')
+for entry in reversed(inputList): 
+    print(entry, end = '-')
+print('\b ]')
+
+for entry in test_vector:
+    print('     ',entry)
