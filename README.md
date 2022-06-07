@@ -16,7 +16,7 @@ circuit_test17gate.v adalah file rangkaian uji dalam format verilog
 Langkah-Langkah Benchmarking ISCAS C17
 1. Membuat program verilog benchmarkc17.v (Pada bagian Brach rangkaian_verilog)
 2. Jalankan program dengan menggunakan script berikut: sudo python3 exhausted_method.py -t c17 benchmarkc17.v
-exhaustive_method.py adalah program untuk pengujian rangkaian kombinasional.
-c17 adalah top level entity/module dari rangkaian yang dideklarasikan pada rangkaian dengan format Verilog.
-benchmarkc17.v adalah file rangkaian uji benchmarking c17 dalam format verilog
+- exhaustive_method.py adalah program untuk pengujian rangkaian kombinasional.
+- c17 adalah top level entity/module dari rangkaian yang dideklarasikan pada rangkaian dengan format Verilog.
+- benchmarkc17.v adalah file rangkaian uji benchmarking c17 dalam format verilog
 3. Lihat dan Analisis Hasil Eksekusi program
